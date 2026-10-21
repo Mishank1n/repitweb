@@ -1,0 +1,11 @@
+.env
+.idea/
+.vscode/
+*.iml
+.DS_Store
+backend/build/
+backend/.gradle/
+web/node_modules/
+web/dist/
+backups/
+*.tsbuildinfo

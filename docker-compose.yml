@@ -1,0 +1,137 @@
+# Логи ограничены по размеру: иначе они растут бесконечно, а в них есть логины и ссылки первой настройки.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Имя проекта в Docker (контейнеры repitweb-app-1…, образ repitweb-app) — не зависит от названия папки.
+name: repitweb
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: repitbot
+      POSTGRES_USER: repitbot
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Заполните DB_PASSWORD в .env}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repitbot -d repitbot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+    # Порт наружу не публикуем: база доступна только приложению внутри docker-сети.
+
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/repitbot
+      DB_USER: repitbot
+    depends_on:
+      db:
+        condition: service_healthy
+    # Сайт открыт только на этом компьютере: http://localhost:8080 (с телефона — через туннель ниже).
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Приложению не нужны никакие привилегии; на диск оно пишет только файлы заданий в /data/files.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    volumes:
+      - files:/data/files
+    logging: *logging
+
+  # Временный HTTPS-адрес, чтобы открыть сайт с телефона, пока нет своего сервера и домена.
+  # localhost.run по SSH: туннель исходящий, порты наружу не открываются. Адрес меняется при каждом
+  # подключении и виден в логах: docker compose logs tunnel. Сайт по нему доступен из интернета,
+  # поэтому туннель включается только явно:  docker compose --profile phone up -d
+  tunnel:
+    build: ./tunnel
+    profiles: ["phone"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - tunnel:/tunnel
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+  # Резервная копия базы и файлов раз в сутки (и при каждом запуске) в папку ./backups, хранятся 14 дней.
+  # Копии содержат персональные данные: папка не попадает в git и доступна только владельцу.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: repitbot
+      PGDATABASE: repitbot
+      PGPASSWORD: ${DB_PASSWORD:?Заполните DB_PASSWORD в .env}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - ./backups:/backups
+      # файлы заданий и материалов — только для чтения: бэкап их не меняет
+      - files:/data/files:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        umask 077
+        while true; do
+          stamp=$$(date +%Y%m%d-%H%M)
+          f=/backups/repitbot-$$stamp.dump
+          if pg_dump -Fc -f "$$f.tmp"; then
+            mv "$$f.tmp" "$$f" && echo "Резервная копия создана: $$f"
+          else
+            rm -f "$$f.tmp"; echo "ОШИБКА: резервная копия не создана"
+          fi
+          # Файлы — архивом без сжатия (фото и PDF уже сжаты); недописанные загрузки (*.part) не нужны.
+          t=/backups/files-$$stamp.tar
+          if tar -cf "$$t.tmp" --exclude='*.part' -C /data/files .; then
+            mv "$$t.tmp" "$$t" && echo "Копия файлов создана: $$t"
+          else
+            rm -f "$$t.tmp"; echo "ОШИБКА: копия файлов не создана"
+          fi
+          find /backups \( -name 'repitbot-*.dump' -o -name 'files-*.tar' \) -mtime +14 -delete
+          sleep 86400
+        done
+
+volumes:
+  # Последний адрес временного туннеля (только для самого туннеля).
+  tunnel:
+  # Внешние тома: `docker compose down -v` их не удаляет, данные переживают пересоздание стека.
+  # Создаются один раз:  docker volume create repitbot_web_pgdata && docker volume create repitbot_files
+  # (старая база версии с Telegram-ботом осталась в томе repitbot_pgdata — сайт её не использует).
+  pgdata:
+    external: true
+    name: repitbot_web_pgdata
+  # Файлы заданий, ответов и материалов.
+  files:
+    external: true
+    name: repitbot_files

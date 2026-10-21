@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: repitbot
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/repitbot}
+    username: ${DB_USER:repitbot}
+    password: ${DB_PASSWORD}
+  servlet:
+    multipart:
+      # Файлы заданий и ответов: до 20 МБ каждый (проверка типа — в FileService).
+      max-file-size: 20MB
+      max-request-size: 21MB
+      # Разбор файла — в контроллере: тогда «слишком большой файл» отвечает понятным текстом (ApiErrors).
+      resolve-lazily: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+app:
+  site-url: ${SITE_URL:http://localhost:8080}
+  timezone: ${TZ:Europe/Moscow}
+  invite-ttl-days: 7
+  digest-time: ${DIGEST_TIME:08:00}
+  report-day: ${REPORT_DAY:SUNDAY}
+  report-time: ${REPORT_TIME:18:00}
+  files-dir: ${FILES_DIR:/data/files}
+
+server:
+  tomcat:
+    # Имя файла приходит в заголовке части загрузки; по умолчанию у Tomcat 512 байт, а русская буква — 2 байта:
+    # файл с именем длиннее ~200 букв (бывает на Windows) отклонялся как «больше 20 МБ».
+    max-part-header-size: 4KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    ru.repitbot: INFO

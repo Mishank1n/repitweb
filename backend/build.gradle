@@ -1,0 +1,62 @@
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+}
+
+group = 'ru.repitbot'
+version = '0.1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation platform(SpringBootPlugin.BOM_COORDINATES)
+    // Jackson новее, чем в Spring Boot 4.1.1: закрывает CVE-2026-68497, -89407, -89425, -91776, -91777.
+    // Jackson 3 — Spring Boot; Jackson 2 может прийти транзитивно. Убрать, когда Boot подтянет эти версии.
+    implementation platform('com.fasterxml.jackson:jackson-bom:2.21.7')
+    implementation platform('tools.jackson:jackson-bom:3.1.7')
+
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Веб-сервер: статика сайта и REST API /api/**.
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // Только BCrypt для паролей (без остального Spring Security: вход и сессии свои, см. api.auth).
+    implementation 'org.springframework.security:spring-security-crypto'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-parameters'
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'app.jar'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+    // Итог в журнале сборки: видно, что тесты действительно запускались и сколько их.
+    afterSuite { desc, result ->
+        if (!desc.parent) {
+            println "Тесты: ${result.testCount}, успешно: ${result.successfulTestCount}, упало: ${result.failedTestCount}"
+        }
+    }
+}

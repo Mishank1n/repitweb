@@ -1,0 +1,14 @@
+# Контекст сборки — весь проект. Секреты и персональные данные в образ не попадают.
+.env
+.env.*
+!.env.example
+backups
+**/*.dump
+.git
+.idea
+.vscode
+**/.DS_Store
+web/node_modules
+web/dist
+backend/build
+backend/.gradle
